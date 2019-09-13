@@ -116,15 +116,11 @@ def get_sift_descriptors(image_name):
 def get_closest_matches(target_descriptors, descriptor_list):
 
     count = 0
-    st = time.time()
     for desc1 in target_descriptors:
         min_distances = np.array([np.apply_along_axis(get_dist, 1, descriptor_list,desc1=desc1)]).flatten()
         min_distances = np.sort(min_distances)[:2]
         if 10 * 10 * min_distances[0] < 6 * 6 * min_distances[1]:
             count += 1
-            # print('yay')
-    en = time.time()
-    # print(en - st)
     return count
 
 def get_color_index(fd1, fd2):
