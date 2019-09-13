@@ -13,7 +13,31 @@ import matplotlib.image as mpimg
 import multiprocessing as mp 
 
 
-#Converts JPEG to YUV and return y,u,v channels
+def get_collection_obj():
+    """create new mongo client
+    
+    Returns:
+        client -- mongo client object
+    """
+    client = MongoClient('mongodb://localhost:27017/')
+    db = client.local
+    collection = db.sift_descriptors
+    return collection
+
+
+def get_dist(desc2, desc1):
+    """returns distance between 2 vectors (sq of euclidean)
+    
+    Arguments:
+        desc2 {np.ndarray} -- first vector
+        desc1 {np.ndarray} -- second vector
+    
+    Returns:
+        np.ndarray -- sum of square of difference of each vector value
+    """
+    return np.sum(np.square(np.subtract(desc1,desc2)))
+
+
 def convert_to_yuv(image):
     img = cv2.imread(image)
     yuv = cv2.cvtColor(img, cv2.COLOR_RGB2YUV)
@@ -47,8 +71,8 @@ def get_feature_descriptor(image):
     
     return (image, channel_moments, )
 
-"""applies color index formula across 2 image moments. 
-https://en.wikipedia.org/wiki/Color_moments#Color_indexing"""
+#applies color index formula across 2 image moments. 
+#https://en.wikipedia.org/wiki/Color_moments#Color_indexing
 def get_color_index(fd1, fd2):
     channelSums = np.zeros(shape=(1,0))
     for channel in ['Y', 'U', 'V']:
@@ -79,36 +103,46 @@ def plot_image(image, similar_images):
     vis = np.concatenate(image_tuple, axis=0)
     cv2.imwrite('out.jpg', vis)
 
-#multiproc function to generate moments and insert into mongo.
-#called only if COLOR_MOMENTS.build_vectors is True
-def generate_and_insert_moments(collection):
+"""multiproc function to generate moments and insert into mongo.
+called only if config build_vectors is True"""
+def generate_and_insert_moments(collection, type):
     pool = mp.Pool(mp.cpu_count())
     args = ['Hands/' + img for img in os.listdir('Hands')]
     upserts = []
-    for channel_moments in tqdm(pool.imap_unordered(get_feature_descriptor, args), total=len(args),mininterval=1):
-        image_name = channel_moments[0].replace('Hands/', '')
-        upserts.append(
-            UpdateOne(
-                filter={'_id': image_name},
-                update={'$set': {'_id': image_name, 'moments': channel_moments[1]}},
-                upsert=True
+
+    if type == 'color_moments':
+        for op in tqdm(pool.imap_unordered(get_feature_descriptor, args), total=len(args),mininterval=1):
+            image_name = op[0].replace('Hands/', '')
+            upserts.append(
+                UpdateOne(
+                    filter={'_id': image_name},
+                    update={'$set': {'_id': image_name, 'moments': op[1]}},
+                    upsert=True
+                )
             )
-        )
-    collection.bulk_write(upserts)
+    
+    if type == 'sift':
+        for op in tqdm(pool.imap_unordered(get_sift_descriptors, args), total=len(args),mininterval=1): 
+            image_name = op[0].replace('Hands/', '')
+            upserts.append(
+                UpdateOne(
+                    filter={'_id': image_name},
+                    update={'$set': {'_id': image_name, 'key_points': op[1], 'descriptors': op[2].tolist()}},
+                    upsert=True
+                )
+            )
+
+    if upserts: collection.bulk_write(upserts)
 
 if __name__ == '__main__':
     config = configparser.ConfigParser()
     config.read('config.ini')
     mp.set_start_method('spawn')
-
-    #initialize local mongo client
-    client = MongoClient('mongodb://localhost:27017/')
-    db = client.local
-    collection = db.image_feature_descriptor
+    collection = get_collection_obj()
 
     #generate color moments and insert fresh into mongo
     if config['COLOR_MOMENTS'].getboolean('build_vectors'):
-        generate_and_insert_moments(collection)
+        generate_and_insert_moments(collection, config['MAIN']['model'])
     
     image = config['COLOR_MOMENTS']['file_name']
     k = config['COLOR_MOMENTS'].getint('k')

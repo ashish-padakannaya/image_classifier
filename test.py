@@ -64,6 +64,17 @@ def get_sift_descriptors(image):
 
 
 def get_k_similar(image, k, pool, chunk_size):
+    """function that returns the k closest images to image
+    
+    Arguments:
+        image {str} -- name of the image file *include extension*
+        k {int} -- number of top similar images to return
+        pool {pool} -- pool object to do multiproc 
+        chunk_size {int} -- chunks of data to split and process for sift
+    
+    Returns:
+        [list] -- [list of tuples of image name and distance]
+    """
     collection = get_collection_obj()
     target = collection.find_one({'_id': image}, projection={"descriptors":1})
     target_descriptors = np.array(target['descriptors'])    
