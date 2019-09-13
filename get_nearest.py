@@ -8,9 +8,9 @@ import pandas as pd
 import ast, sys, os, time
 from pymongo import MongoClient, UpdateOne
 import configparser, pprint
-import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
-import multiprocessing as mp 
+from functools import partial
+import multiprocessing as mp
+from jinja2 import Environment, select_autoescape, FileSystemLoader
 
 
 def get_collection_obj(collection_name):
@@ -86,6 +86,10 @@ def get_feature_descriptor(image):
     
     return (image, channel_moments, )
 
+def chunk_records(record_ids, chunk_size):
+    for i in range(0, len(record_ids), chunk_size):
+        yield record_ids[i:i + chunk_size]
+
 def get_chunk_matches(target_descriptors, ids):
     matches = []
     collection = get_collection_obj('sift_descriptors')
@@ -158,7 +162,12 @@ def get_k_similar_color_moment(image_name, k, images_directory):
 
     #list of tuples of similarity measures [(img2, 220), (img3, 400), (img4,120)]
     similarity_measures = []
-    rows = list(collection.find({}, projection={'moments': 1}))    
+
+    #get all image names in directory to filter at mongo to fetch data for those names only
+    query = {"_id": {
+        "$in": os.listdir(images_directory)
+    }}
+    rows = list(collection.find(query, projection={'moments': 1}))    
     similarity_measures = [(row['_id'], get_color_index(row['moments'], target_moments)) for row in rows]
 
     #sort distances and return till k+1 bc first match will be the target image with distance 0
@@ -166,7 +175,7 @@ def get_k_similar_color_moment(image_name, k, images_directory):
     return similarity_measures[:k+1]
 
 
-def get_k_similar_sift(image_name, k, pool, chunk_size):
+def get_k_similar_sift(image_name, k, images_directory, pool, chunk_size):
     """function that returns the k closest images to image
     
     Arguments:
@@ -182,7 +191,9 @@ def get_k_similar_sift(image_name, k, pool, chunk_size):
     target = collection.find_one({'_id': image_name}, projection={"descriptors":1})
     target_descriptors = np.array(target['descriptors'])    
     matches = []
-    ids = collection.find().distinct('_id')
+
+    ids = os.listdir(images_directory)
+    chunk_size = min(len(ids), chunk_size)
 
     partial_func = partial(get_chunk_matches,target_descriptors)
     for op in tqdm(pool.imap_unordered(partial_func,list(chunk_records(ids,chunk_size))), total=int(len(ids)/chunk_size), mininterval=1):
@@ -190,18 +201,30 @@ def get_k_similar_sift(image_name, k, pool, chunk_size):
     matches.sort(key = itemgetter(1), reverse=True)
     return matches[:k+1]
 
-def plot_image(image, similar_images):
+def plot_image(similar_images, images_directory):
     """saves image into a file
     
     Arguments:
         image {str} -- name of the image
         similar_images {list} -- top similar images
     """
-    img = cv2.imread('Hands/' + image)
-    other_imgs = [cv2.imread('Hands/' + image[0]) for image in similar_images]
-    image_tuple = (img, ) + tuple(other_imgs)
-    vis = np.concatenate(image_tuple, axis=0)
-    cv2.imwrite('out.jpg', vis)
+
+    templateLoader = FileSystemLoader(searchpath="./")
+    env = Environment(
+        loader=templateLoader,
+        autoescape=select_autoescape(['html', 'xml'])
+    )
+    template = env.get_template('template.html')
+    optext = template.render({'images':similar_images, 'images_directory': images_directory})
+    text_file = open("k_similar_images.html", "w")
+    text_file.write(optext)
+    text_file.close()
+    print("open k_similar_images.html")
+    # img = cv2.imread('Hands/' + image)
+    # other_imgs = [cv2.imread('Hands/' + image[0]) for image in similar_images]
+    # image_tuple = (img, ) + tuple(other_imgs)
+    # vis = np.concatenate(image_tuple, axis=0)
+    # cv2.imwrite('out.jpg', vis)
 
 
 def generate_and_insert_moments(type, images_directory):
@@ -215,7 +238,7 @@ def generate_and_insert_moments(type, images_directory):
 
     args = [images_directory + img for img in os.listdir(images_directory)]
     upserts = []
-    if type == 'color_moments':
+    if type == 'color_moment':
         for op in tqdm(pool.imap_unordered(get_feature_descriptor, args), total=len(args),mininterval=1):
             image_name = op[0].replace(images_directory, '')
             upserts.append(
@@ -237,7 +260,8 @@ def generate_and_insert_moments(type, images_directory):
                 )
             )
 
-    if upserts: collection.bulk_write(upserts)
+    if upserts: 
+        collection.bulk_write(upserts)
 
 if __name__ == '__main__':
     try:
@@ -260,12 +284,13 @@ if __name__ == '__main__':
         print("models built. getting {0} closest matches for {1}".format(k, image_name))
         if model == 'sift':
             chunk_size = config['MAIN'].getint('chunk_size')
-            similar_images = get_k_similar_sift(image_name, 10, pool, chunk_size)
+            similar_images = get_k_similar_sift(image_name, k, images_directory, pool, chunk_size)
         elif model == 'color_moment':
             similar_images = get_k_similar_color_moment(image_name, k, images_directory)
-        if similar_images : pprint.pprint(similar_images, indent=4)
-        plot_image(image_name, similar_images)
+        plot_image(similar_images, images_directory)
     
+    except Exception as e:
+        print(e.with_traceback())
     finally:
         print("closing pool")
         pool.close()
