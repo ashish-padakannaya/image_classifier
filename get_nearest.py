@@ -5,7 +5,7 @@ import scipy.stats as stats
 from operator import itemgetter
 from tqdm import tqdm
 import pandas as pd
-import ast, sys, os, time
+import ast, sys, os, time, traceback
 from pymongo import MongoClient, UpdateOne
 import configparser, pprint
 from functools import partial
@@ -219,12 +219,7 @@ def plot_image(similar_images, images_directory):
     text_file = open("k_similar_images.html", "w")
     text_file.write(optext)
     text_file.close()
-    print("open k_similar_images.html")
-    # img = cv2.imread('Hands/' + image)
-    # other_imgs = [cv2.imread('Hands/' + image[0]) for image in similar_images]
-    # image_tuple = (img, ) + tuple(other_imgs)
-    # vis = np.concatenate(image_tuple, axis=0)
-    # cv2.imwrite('out.jpg', vis)
+    print("ouput saved in k_similar_images.html")
 
 
 def generate_and_insert_moments(type, images_directory):
@@ -290,7 +285,7 @@ if __name__ == '__main__':
         plot_image(similar_images, images_directory)
     
     except Exception as e:
-        print(e.with_traceback())
+        traceback.print_exc()
     finally:
         print("closing pool")
         pool.close()
