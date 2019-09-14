@@ -5,7 +5,7 @@ import scipy.stats as stats
 from operator import itemgetter
 from tqdm import tqdm
 import pandas as pd
-import ast, sys, os, time, traceback
+import ast, sys, os, time, traceback, webbrowser
 from pymongo import MongoClient, UpdateOne
 import configparser, pprint
 from functools import partial
@@ -115,12 +115,11 @@ def get_sift_descriptors(image_name):
 
 def get_closest_matches(target_descriptors, descriptor_list):
     count = 0
-    st = time.time()
+    # st = time.time()
     for desc1 in target_descriptors:
         min_distances = np.sort(np.apply_along_axis(get_dist, 1, descriptor_list,desc1=desc1).flatten())[:2]
-        if 10 * 10 * min_distances[0] < 6 * 6 * min_distances[1]:
-            count += 1
-    print(time.time() - st)
+        if 10 * 10 * min_distances[0] < 6 * 6 * min_distances[1]: count += 1
+    # print(time.time() - st)
     return count
 
 def get_color_index(fd1, fd2):
@@ -189,13 +188,16 @@ def get_k_similar_sift(image_name, k, images_directory, pool, chunk_size):
     matches = []
     ids = os.listdir(images_directory)
 
+    chunk_size = max(5,int(len(ids)/(8*8)))
+    print("setting chunksize to ", chunk_size)
+
     partial_func = partial(get_chunk_matches,target_descriptors)
     for op in tqdm(pool.imap_unordered(partial_func,list(chunk_records(ids,chunk_size))), total=int(len(ids)/chunk_size), mininterval=1):
         matches = matches + op
     matches.sort(key = itemgetter(1), reverse=True)
     return matches[:k+1]
 
-def plot_image(similar_images, images_directory):
+def plot_image(similar_images, images_directory, chrome_path):
     """saves image into a file
     
     Arguments:
@@ -214,6 +216,8 @@ def plot_image(similar_images, images_directory):
     text_file.write(optext)
     text_file.close()
     print("Ouput saved in k_similar_images.html")
+    webbrowser.get(chrome_path).open('k_similar_images.html')
+
 
 
 def generate_and_insert_moments(type, images_directory):
@@ -255,7 +259,7 @@ def generate_and_insert_moments(type, images_directory):
 
 if __name__ == '__main__':
     try:
-        config = configparser.ConfigParser()
+        config = configparser.RawConfigParser()
         config.read('config.ini')
         mp.set_start_method('spawn')
         pool = mp.Pool(mp.cpu_count())
@@ -277,7 +281,7 @@ if __name__ == '__main__':
             similar_images = get_k_similar_sift(image_name, k, images_directory, pool, chunk_size)
         elif model == 'color_moment':
             similar_images = get_k_similar_color_moment(image_name, k, images_directory)
-        plot_image(similar_images, images_directory)
+        plot_image(similar_images, images_directory, config['MAIN']['chrome_path'])
     
     except Exception as e:
         traceback.print_exc()
