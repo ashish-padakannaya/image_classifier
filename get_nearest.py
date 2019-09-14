@@ -34,7 +34,7 @@ def get_dist(desc2, desc1):
     Returns:
         np.ndarray -- sum of square of difference of each vector value
     """
-    return np.sum(np.square(np.subtract(desc1,desc2)))
+    return (np.subtract(desc1,desc2)**2).sum()
 
 
 def convert_to_yuv(image):
@@ -114,13 +114,13 @@ def get_sift_descriptors(image_name):
 
 
 def get_closest_matches(target_descriptors, descriptor_list):
-
     count = 0
+    st = time.time()
     for desc1 in target_descriptors:
-        min_distances = np.array([np.apply_along_axis(get_dist, 1, descriptor_list,desc1=desc1)]).flatten()
-        min_distances = np.sort(min_distances)[:2]
+        min_distances = np.sort(np.apply_along_axis(get_dist, 1, descriptor_list,desc1=desc1).flatten())[:2]
         if 10 * 10 * min_distances[0] < 6 * 6 * min_distances[1]:
             count += 1
+    print(time.time() - st)
     return count
 
 def get_color_index(fd1, fd2):
@@ -187,9 +187,7 @@ def get_k_similar_sift(image_name, k, images_directory, pool, chunk_size):
     target = collection.find_one({'_id': image_name}, projection={"descriptors":1})
     target_descriptors = np.array(target['descriptors'])    
     matches = []
-
     ids = os.listdir(images_directory)
-    chunk_size = min(len(ids), chunk_size)
 
     partial_func = partial(get_chunk_matches,target_descriptors)
     for op in tqdm(pool.imap_unordered(partial_func,list(chunk_records(ids,chunk_size))), total=int(len(ids)/chunk_size), mininterval=1):
@@ -215,7 +213,7 @@ def plot_image(similar_images, images_directory):
     text_file = open("k_similar_images.html", "w")
     text_file.write(optext)
     text_file.close()
-    print("ouput saved in k_similar_images.html")
+    print("Ouput saved in k_similar_images.html")
 
 
 def generate_and_insert_moments(type, images_directory):
@@ -252,6 +250,7 @@ def generate_and_insert_moments(type, images_directory):
             )
 
     if upserts: 
+        # collection.delete_many({})
         collection.bulk_write(upserts)
 
 if __name__ == '__main__':
@@ -268,11 +267,11 @@ if __name__ == '__main__':
 
         #generate color moments or sift descriptors and keypoints and insert fresh into mongo
         if config['MAIN'].getboolean('build_vectors'):
-            print("building models for " + model + "..............")
+            print("Building models for " + model + "..............")
             generate_and_insert_moments(model, images_directory)
         
         similar_images = []
-        print("models built. getting {0} closest matches for {1}".format(k, image_name))
+        print("Models built. getting {0} closest matches for {1}".format(k, image_name))
         if model == 'sift':
             chunk_size = config['MAIN'].getint('chunk_size')
             similar_images = get_k_similar_sift(image_name, k, images_directory, pool, chunk_size)
