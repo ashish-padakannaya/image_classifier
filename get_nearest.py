@@ -1,9 +1,9 @@
 import cv2
-import numpy as np
 import skimage
 import scipy.stats as stats
 from operator import itemgetter
 from tqdm import tqdm
+import numpy as np
 import pandas as pd
 import ast, sys, os, time, traceback, webbrowser
 from pymongo import MongoClient, UpdateOne
@@ -11,8 +11,12 @@ import configparser, pprint
 from functools import partial
 import multiprocessing as mp
 from jinja2 import Environment, select_autoescape, FileSystemLoader
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
 
-
+#********************************************************************************************************************************
+#HELPER FUNCTIONS USED BY BOTH SIFT AND COLOR MOMENT FUNCTIONS  ################################################################
+#********************************************************************************************************************************
 def get_collection_obj(collection_name):
     """create new mongo client
     
@@ -24,12 +28,110 @@ def get_collection_obj(collection_name):
     collection = db[collection_name]
     return collection
 
-def convert_to_yuv(image):
-    """returns yuv channels for jpeg image
+def show_similar_image(similar_images, images_directory, chrome_path):
+    """saves image into a file
     
     Arguments:
-        image {numpy arrayu} -- array of pixels for image
+        image {str} -- name of the image
+        similar_images {list} -- top similar images
+    """
+
+    templateLoader = FileSystemLoader(searchpath="./")
+    env = Environment(
+        loader=templateLoader,
+        autoescape=select_autoescape(['html', 'xml'])
+    )
+    template = env.get_template('template.html')
+    optext = template.render({'images':similar_images, 'images_directory': images_directory})
+    text_file = open("k_similar_images.html", "w")
+    text_file.write(optext)
+    text_file.close()
+    try:
+        webbrowser.get(chrome_path).open('k_similar_images.html')
+    except Exception:
+        print("Failed to open Chrome. check ouput saved in k_similar_images.html")
+
+def generate_and_insert_moments(type, images_directory):
+    """function to compute and populate mongodb with sift descriptors or color moments
+    Arguments:
+        collection {collection obj} -- mongo collection object 
+        type {str} -- model name (sift, color_moments)
+    """
+    pool = mp.Pool(mp.cpu_count())
+    collection = get_collection_obj('color_moment_descriptors')
+
+    args = [images_directory + img for img in os.listdir(images_directory)]
+    upserts = []
+    if type == 'color_moment':
+        for op in tqdm(pool.imap_unordered(get_feature_descriptor, args), total=len(args),mininterval=1):
+            image_name = op[0].replace(images_directory, '')
+            upserts.append(
+                UpdateOne(
+                    filter={'_id': image_name},
+                    update={'$set': {'_id': image_name, 'moments': op[1]}},
+                    upsert=True
+                )
+            )
     
+    if type == 'sift':
+        for op in tqdm(pool.imap_unordered(get_sift_descriptors, args), total=len(args),mininterval=1): 
+            image_name = op[0].replace(images_directory, '')
+            upserts.append(
+                UpdateOne(
+                    filter={'_id': image_name},
+                    update={'$set': {'_id': image_name, 'key_points': op[1], 'descriptors': op[2].tolist()}},
+                    upsert=True
+                )
+            )
+
+    if upserts: 
+        # collection.delete_many({})
+        collection.bulk_write(upserts)
+    
+def make_lut_u():
+    return np.array([[[i,255-i,0] for i in range(256)]],dtype=np.uint8)
+
+def make_lut_v():
+    return np.array([[[0,255-i,i] for i in range(256)]],dtype=np.uint8)
+
+def visualize_save_vector(model, image_name, images_directory):
+    if model == 'sift':
+        sift = cv2.xfeatures2d.SIFT_create()
+        img = cv2.imread(images_directory + image_name)
+        gray_img = cv2.cvtColor(img,cv2.COLOR_RGB2GRAY)
+        kp, desc = sift.detectAndCompute(gray_img, None)
+        np.savetxt('output/sift_descriptors.txt', desc)
+        img = cv2.drawKeypoints(gray_img,kp,img)
+        cv2.imwrite('output/sift.jpg', img)
+    
+    if model == 'color_moment':
+        channel_moments = get_feature_descriptor(images_directory + image_name)[1]
+        for channel in channel_moments.keys():
+            mean = np.array(channel_moments[channel][0::3])
+            sd = np.array(channel_moments[channel][1::3])
+            sk = np.array(channel_moments[channel][2::3])
+            print(channel)
+            np.savetxt('output/' + channel + '_moments.txt', np.stack((mean,sd,sk)))
+        img = cv2.imread(images_directory + image_name)
+        y, u, v = convert_to_yuv(images_directory+image_name)
+        y = cv2.cvtColor(y, cv2.COLOR_GRAY2RGB)
+        u = cv2.cvtColor(u, cv2.COLOR_GRAY2RGB)
+        v = cv2.cvtColor(v, cv2.COLOR_GRAY2RGB)
+        u_mapped = cv2.LUT(u, make_lut_u())
+        v_mapped = cv2.LUT(v, make_lut_v())
+        result = np.vstack([img, y, u_mapped, v_mapped])
+        cv2.imwrite('output/YUV.jpg',result)
+
+#********************************************************************************************************************************
+#COLOR_MOMENT METHODS ###########################################################################################################
+#********************************************************************************************************************************
+
+def convert_to_yuv(image):
+    """returns yuv channels for jpeg image
+
+    Arguments:
+        image {numpy arrayu} -- array of pixels for image
+
     Returns:
         channels -- yuv channels
     """
@@ -72,44 +174,6 @@ def get_feature_descriptor(image):
         channel_moments[channel] = list(np.stack((means,sd,skew), axis = -1).flatten())
     
     return (image, channel_moments, )
-
-def chunk_records(record_ids, chunk_size):
-    for i in range(0, len(record_ids), chunk_size):
-        yield record_ids[i:i + chunk_size]
-
-def get_chunk_matches(target_descriptors, ids):
-    matches = []
-    collection = get_collection_obj('sift_descriptors')
-    rows = list(collection.find({"_id": {"$in":ids}}, projection={"descriptors":1}))
-    for row in rows:
-    # for row in collection.find({"_id": {"$in":ids}}, projection={"descriptors":1}):
-        count = get_closest_matches(target_descriptors, np.array(row['descriptors']))
-        matches.append((row['_id'], count))
-    return matches
-
-def get_sift_descriptors(image_name):
-    sift = cv2.xfeatures2d.SIFT_create()
-    gray = cv2.imread(image_name, cv2.IMREAD_GRAYSCALE)
-    kp, desc = sift.detectAndCompute(gray, None)
-    kp = [{ 'angle': point.angle,
-            'class_id': point.class_id,
-            'octave': point.octave,
-            'pt': point.pt,
-            'response': point.response,
-            'size': point.size} for point in kp] 
-    return (image_name, kp, desc)
-
-
-def get_closest_matches(target_descriptors, descriptor_list):
-    count = 0
-    # st = time.time()
-    for desc1 in target_descriptors:
-        min_distances = [np.sum((descriptor_list - desc1)**2, axis=1)]
-        min_distances = np.sort(np.array(min_distances).flatten())[:2]
-        # min_distances = np.sort(np.apply_along_axis(get_dist, 1, descriptor_list,desc1=desc1).flatten())[:2]
-        if 10 * 10 * min_distances[0] < 6 * 6 * min_distances[1]: count += 1
-    # print(time.time() - st)
-    return count
 
 def get_color_index(fd1, fd2):
     """applies color indexing formula across 2 image moments. 
@@ -158,15 +222,17 @@ def get_k_similar_color_moment(image_name, k, images_directory):
     similarity_measures.sort(key = itemgetter(1))
     return similarity_measures[:k+1]
 
+#********************************************************************************************************************************
+#SIFT METHODS ##################################################################################################################
+#********************************************************************************************************************************
 
-def get_k_similar_sift(image_name, k, images_directory, pool, chunk_size):
+def get_k_similar_sift(image_name, k, images_directory, pool):
     """function that returns the k closest images to image
     
     Arguments:
         image {str} -- name of the image file *include extension*
         k {int} -- number of top similar images to return
         pool {pool} -- pool object to do multiproc 
-        chunk_size {int} -- chunks of data to split and process for sift
     
     Returns:
         [list] -- [list of tuples of image name and distance]
@@ -177,6 +243,7 @@ def get_k_similar_sift(image_name, k, images_directory, pool, chunk_size):
     matches = []
     ids = os.listdir(images_directory)
 
+    #checking images in chunks so multiple threads can process data from mongo
     chunk_size = max(5,int(len(ids)/(8*8)))
     print("setting chunksize to ", chunk_size)
 
@@ -186,68 +253,47 @@ def get_k_similar_sift(image_name, k, images_directory, pool, chunk_size):
     matches.sort(key = itemgetter(1), reverse=True)
     return matches[:k+1]
 
-def plot_image(similar_images, images_directory, chrome_path):
-    """saves image into a file
-    
-    Arguments:
-        image {str} -- name of the image
-        similar_images {list} -- top similar images
-    """
+def chunk_records(record_ids, chunk_size):
+    for i in range(0, len(record_ids), chunk_size):
+        yield record_ids[i:i + chunk_size]
 
-    templateLoader = FileSystemLoader(searchpath="./")
-    env = Environment(
-        loader=templateLoader,
-        autoescape=select_autoescape(['html', 'xml'])
-    )
-    template = env.get_template('template.html')
-    optext = template.render({'images':similar_images, 'images_directory': images_directory})
-    text_file = open("k_similar_images.html", "w")
-    text_file.write(optext)
-    text_file.close()
-    try:
-        webbrowser.get(chrome_path).open('k_similar_images.html')
-    except Exception:
-        print("Failed to open Chrome. check ouput saved in k_similar_images.html")
+def get_chunk_matches(target_descriptors, ids):
+    matches = []
+    collection = get_collection_obj('sift_descriptors')
+    rows = list(collection.find({"_id": {"$in":ids}}, projection={"descriptors":1}))
+    for row in rows:
+    # for row in collection.find({"_id": {"$in":ids}}, projection={"descriptors":1}):
+        count = get_closest_matches(target_descriptors, np.array(row['descriptors']))
+        matches.append((row['_id'], count))
+    return matches
+
+def get_sift_descriptors(image_name):
+    sift = cv2.xfeatures2d.SIFT_create()
+    gray = cv2.imread(image_name, cv2.IMREAD_GRAYSCALE)
+    kp, desc = sift.detectAndCompute(gray, None)
+    kp = [{ 'angle': point.angle,
+            'class_id': point.class_id,
+            'octave': point.octave,
+            'pt': point.pt,
+            'response': point.response,
+            'size': point.size} for point in kp] 
+    return (image_name, kp, desc)
 
 
+def get_closest_matches(target_descriptors, descriptor_list):
+    count = 0
+    # st = time.time()
+    for desc1 in target_descriptors:
+        min_distances = [np.sum((descriptor_list - desc1)**2, axis=1)]
+        min_distances = np.sort(np.array(min_distances).flatten())[:2]
+        # min_distances = np.sort(np.apply_along_axis(get_dist, 1, descriptor_list,desc1=desc1).flatten())[:2]
+        if 10 * 10 * min_distances[0] < 6 * 6 * min_distances[1]: count += 1
+    # print(time.time() - st)
+    return count
 
-def generate_and_insert_moments(type, images_directory):
-    """function to compute and populate mongodb with sift descriptors or color moments
-    Arguments:
-        collection {collection obj} -- mongo collection object 
-        type {str} -- model name (sift, color_moments)
-    """
-    pool = mp.Pool(mp.cpu_count())
-    collection = get_collection_obj('color_moment_descriptors')
-
-    args = [images_directory + img for img in os.listdir(images_directory)]
-    upserts = []
-    if type == 'color_moment':
-        for op in tqdm(pool.imap_unordered(get_feature_descriptor, args), total=len(args),mininterval=1):
-            image_name = op[0].replace(images_directory, '')
-            upserts.append(
-                UpdateOne(
-                    filter={'_id': image_name},
-                    update={'$set': {'_id': image_name, 'moments': op[1]}},
-                    upsert=True
-                )
-            )
-    
-    if type == 'sift':
-        for op in tqdm(pool.imap_unordered(get_sift_descriptors, args), total=len(args),mininterval=1): 
-            image_name = op[0].replace(images_directory, '')
-            upserts.append(
-                UpdateOne(
-                    filter={'_id': image_name},
-                    update={'$set': {'_id': image_name, 'key_points': op[1], 'descriptors': op[2].tolist()}},
-                    upsert=True
-                )
-            )
-
-    if upserts: 
-        # collection.delete_many({})
-        collection.bulk_write(upserts)
-
+#********************************************************************************************************************************
+#MAIN FUNCTION CALL #############################################################################################################
+#********************************************************************************************************************************
 if __name__ == '__main__':
     try:
         config = configparser.RawConfigParser()
@@ -260,6 +306,10 @@ if __name__ == '__main__':
         images_directory = config['MAIN']['images_directory']
         k = config['MAIN'].getint('k')
 
+        if config['MAIN'].getboolean('visualize_single_vector'):
+            visualize_save_vector(model, image_name, images_directory)
+            sys.exit()
+
         #generate color moments or sift descriptors and keypoints and insert fresh into mongo
         if config['MAIN'].getboolean('rebuild_vectors'):
             print("Building models for " + model + "..............")
@@ -268,15 +318,15 @@ if __name__ == '__main__':
         similar_images = []
         print("Models built. getting {0} closest matches for {1}".format(k, image_name))
         if model == 'sift':
-            chunk_size = config['MAIN'].getint('chunk_size')
-            similar_images = get_k_similar_sift(image_name, k, images_directory, pool, chunk_size)
+            similar_images = get_k_similar_sift(image_name, k, images_directory, pool)
         elif model == 'color_moment':
             similar_images = get_k_similar_color_moment(image_name, k, images_directory)
-        plot_image(similar_images, images_directory, config['MAIN']['chrome_path'])
+        show_similar_image(similar_images, images_directory, config['MAIN']['chrome_path'])
     
     except Exception as e:
         traceback.print_exc()
     finally:
-        print("closing pool")
-        pool.close()
+        if 'pool' in vars() : 
+            print("closing pool")
+            pool.close()
 
