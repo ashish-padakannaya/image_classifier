@@ -11,8 +11,6 @@ import configparser, pprint
 from functools import partial
 import multiprocessing as mp
 from jinja2 import Environment, select_autoescape, FileSystemLoader
-import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
 
 #********************************************************************************************************************************
 #HELPER FUNCTIONS USED BY BOTH SIFT AND COLOR MOMENT FUNCTIONS  ################################################################
@@ -87,7 +85,7 @@ def generate_and_insert_moments(type, images_directory):
     if upserts: 
         # collection.delete_many({})
         collection.bulk_write(upserts)
-    
+
 def make_lut_u():
     return np.array([[[i,255-i,0] for i in range(256)]],dtype=np.uint8)
 
@@ -308,7 +306,6 @@ if __name__ == '__main__':
 
         if config['MAIN'].getboolean('visualize_single_vector'):
             visualize_save_vector(model, image_name, images_directory)
-            sys.exit()
 
         #generate color moments or sift descriptors and keypoints and insert fresh into mongo
         if config['MAIN'].getboolean('rebuild_vectors'):
