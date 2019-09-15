@@ -242,7 +242,7 @@ def get_k_similar_sift(image_name, k, images_directory, pool):
     ids = os.listdir(images_directory)
 
     #checking images in chunks so multiple threads can process data from mongo
-    chunk_size = max(5,int(len(ids)/(8*8)))
+    chunk_size = max(10,int(len(ids)/(8*8*8)))
     print("setting chunksize to ", chunk_size)
 
     partial_func = partial(get_chunk_matches,target_descriptors)
