@@ -24,19 +24,6 @@ def get_collection_obj(collection_name):
     collection = db[collection_name]
     return collection
 
-def get_dist(desc2, desc1):
-    """returns distance between 2 vectors (sq of euclidean)
-    
-    Arguments:
-        desc2 {np.ndarray} -- first vector
-        desc1 {np.ndarray} -- second vector
-    
-    Returns:
-        np.ndarray -- sum of square of difference of each vector value
-    """
-    return (np.subtract(desc1,desc2)**2).sum()
-
-
 def convert_to_yuv(image):
     """returns yuv channels for jpeg image
     
@@ -117,7 +104,9 @@ def get_closest_matches(target_descriptors, descriptor_list):
     count = 0
     # st = time.time()
     for desc1 in target_descriptors:
-        min_distances = np.sort(np.apply_along_axis(get_dist, 1, descriptor_list,desc1=desc1).flatten())[:2]
+        min_distances = [np.sum((descriptor_list - desc1)**2, axis=1)]
+        min_distances = np.sort(np.array(min_distances).flatten())[:2]
+        # min_distances = np.sort(np.apply_along_axis(get_dist, 1, descriptor_list,desc1=desc1).flatten())[:2]
         if 10 * 10 * min_distances[0] < 6 * 6 * min_distances[1]: count += 1
     # print(time.time() - st)
     return count
@@ -215,8 +204,10 @@ def plot_image(similar_images, images_directory, chrome_path):
     text_file = open("k_similar_images.html", "w")
     text_file.write(optext)
     text_file.close()
-    print("Ouput saved in k_similar_images.html")
-    webbrowser.get(chrome_path).open('k_similar_images.html')
+    try:
+        webbrowser.get(chrome_path).open('k_similar_images.html')
+    except Exception:
+        print("Failed to open Chrome. check ouput saved in k_similar_images.html")
 
 
 
@@ -270,7 +261,7 @@ if __name__ == '__main__':
         k = config['MAIN'].getint('k')
 
         #generate color moments or sift descriptors and keypoints and insert fresh into mongo
-        if config['MAIN'].getboolean('build_vectors'):
+        if config['MAIN'].getboolean('rebuild_vectors'):
             print("Building models for " + model + "..............")
             generate_and_insert_moments(model, images_directory)
         
