@@ -19,6 +19,7 @@ Now install all the required libraries. Make sure you're inside the project dire
 # config.ini
 
 config.ini holds all the parameters to be manipulated.
+
 |  KEY|POSSIBLE VALUES |DESCRIPTION  |
 |--|--|--|
 | model| sift, color_moment  |Specify which model to run the search against. |
