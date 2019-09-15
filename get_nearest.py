@@ -17,7 +17,6 @@ from jinja2 import Environment, select_autoescape, FileSystemLoader
 #********************************************************************************************************************************
 def get_collection_obj(collection_name):
     """create new mongo client
-    
     Returns:
         client -- mongo client object
     """
@@ -28,12 +27,10 @@ def get_collection_obj(collection_name):
 
 def show_similar_image(similar_images, images_directory, chrome_path):
     """saves image into a file
-    
     Arguments:
         image {str} -- name of the image
         similar_images {list} -- top similar images
     """
-
     templateLoader = FileSystemLoader(searchpath="./")
     env = Environment(
         loader=templateLoader,
@@ -83,8 +80,9 @@ def generate_and_insert_moments(type, images_directory):
             )
 
     if upserts: 
-        # collection.delete_many({})
+        print("Generated feature descriptors. Upserting to Mongo.....")
         collection.bulk_write(upserts)
+        print("Upsert complete.")
 
 def make_lut_u():
     return np.array([[[i,255-i,0] for i in range(256)]],dtype=np.uint8)
@@ -93,6 +91,12 @@ def make_lut_v():
     return np.array([[[0,255-i,i] for i in range(256)]],dtype=np.uint8)
 
 def visualize_save_vector(model, image_name, images_directory):
+    """save the image vectors and visualize them in seaparate output    
+    Arguments:
+        model {str} -- model used
+        image_name {str} -- name of the file
+        images_directory {str} -- path to file
+    """
     if model == 'sift':
         sift = cv2.xfeatures2d.SIFT_create()
         img = cv2.imread(images_directory + image_name)
@@ -108,7 +112,6 @@ def visualize_save_vector(model, image_name, images_directory):
             mean = np.array(channel_moments[channel][0::3])
             sd = np.array(channel_moments[channel][1::3])
             sk = np.array(channel_moments[channel][2::3])
-            print(channel)
             np.savetxt('output/' + channel + '_moments.txt', np.stack((mean,sd,sk)))
         img = cv2.imread(images_directory + image_name)
         y, u, v = convert_to_yuv(images_directory+image_name)
@@ -119,6 +122,8 @@ def visualize_save_vector(model, image_name, images_directory):
         v_mapped = cv2.LUT(v, make_lut_v())
         result = np.vstack([img, y, u_mapped, v_mapped])
         cv2.imwrite('output/YUV.jpg',result)
+    
+    print("Vectors and visualisation for " + image_name + " stored in output folder")
 
 #********************************************************************************************************************************
 #COLOR_MOMENT METHODS ###########################################################################################################
@@ -126,10 +131,8 @@ def visualize_save_vector(model, image_name, images_directory):
 
 def convert_to_yuv(image):
     """returns yuv channels for jpeg image
-
     Arguments:
         image {numpy arrayu} -- array of pixels for image
-
     Returns:
         channels -- yuv channels
     """
@@ -141,10 +144,8 @@ def convert_to_yuv(image):
 
 def get_feature_descriptor(image):
     """generate all feature descriptors for an image
-    
     Arguments:
         image {numpy array} -- image pixel array
-    
     Returns:
         tuple -- tuple of image name and channel moments for Y, U and V
     """
@@ -175,12 +176,10 @@ def get_feature_descriptor(image):
 
 def get_color_index(fd1, fd2):
     """applies color indexing formula across 2 image moments. 
-       https://en.wikipedia.org/wiki/Color_moments#Color_indexing
-    
+       https://en.wikipedia.org/wiki/Color_moments#Color_indexing 
     Arguments:
         fd1 {vector} -- feature desc 1
         fd2 {vector} -- feature desc 2
-    
     Returns:
         float -- total distance
     """
@@ -192,12 +191,10 @@ def get_color_index(fd1, fd2):
 
 def get_k_similar_color_moment(image_name, k, images_directory):
     """get top k similar imagess
-    
     Arguments:
         image_name {str} -- image name
         collection {collection} -- mongo collection object
         k {int} -- number of images to return
-    
     Returns:
         list -- top k image list 
     """
@@ -226,12 +223,10 @@ def get_k_similar_color_moment(image_name, k, images_directory):
 
 def get_k_similar_sift(image_name, k, images_directory, pool):
     """function that returns the k closest images to image
-    
     Arguments:
         image {str} -- name of the image file *include extension*
         k {int} -- number of top similar images to return
         pool {pool} -- pool object to do multiproc 
-    
     Returns:
         [list] -- [list of tuples of image name and distance]
     """
@@ -251,20 +246,22 @@ def get_k_similar_sift(image_name, k, images_directory, pool):
     matches.sort(key = itemgetter(1), reverse=True)
     return matches[:k+1]
 
+#splits list record_ids into multiple lists each of size chunk_size
 def chunk_records(record_ids, chunk_size):
     for i in range(0, len(record_ids), chunk_size):
         yield record_ids[i:i + chunk_size]
 
+#get matches of all keypoints in tha target image
 def get_chunk_matches(target_descriptors, ids):
     matches = []
     collection = get_collection_obj('sift_descriptors')
     rows = list(collection.find({"_id": {"$in":ids}}, projection={"descriptors":1}))
     for row in rows:
-    # for row in collection.find({"_id": {"$in":ids}}, projection={"descriptors":1}):
         count = get_closest_matches(target_descriptors, np.array(row['descriptors']))
         matches.append((row['_id'], count))
     return matches
 
+#return SIFT keypoints and descriptors given an image
 def get_sift_descriptors(image_name):
     sift = cv2.xfeatures2d.SIFT_create()
     gray = cv2.imread(image_name, cv2.IMREAD_GRAYSCALE)
@@ -280,13 +277,10 @@ def get_sift_descriptors(image_name):
 
 def get_closest_matches(target_descriptors, descriptor_list):
     count = 0
-    # st = time.time()
     for desc1 in target_descriptors:
         min_distances = [np.sum((descriptor_list - desc1)**2, axis=1)]
         min_distances = np.sort(np.array(min_distances).flatten())[:2]
-        # min_distances = np.sort(np.apply_along_axis(get_dist, 1, descriptor_list,desc1=desc1).flatten())[:2]
         if 10 * 10 * min_distances[0] < 6 * 6 * min_distances[1]: count += 1
-    # print(time.time() - st)
     return count
 
 #********************************************************************************************************************************
@@ -304,6 +298,7 @@ if __name__ == '__main__':
         images_directory = config['MAIN']['images_directory']
         k = config['MAIN'].getint('k')
 
+        #if True, store descriptors and visualisation in output folder
         if config['MAIN'].getboolean('visualize_single_vector'):
             visualize_save_vector(model, image_name, images_directory)
 
