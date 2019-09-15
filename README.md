@@ -45,20 +45,25 @@ For instance, If the system has to find the 10 most similar images using color m
 		rebuild_vectors: True,
 		file_name: Hand_0000002.jpeg,
 		k: 10,
-    	images_directory: Hands_dataset/
+		visualize_single_vector: False,
+    		images_directory: Hands_dataset/
 	}
 If we need to find the 100 most similar for the same image but this time with SIFT, we use the same config as earlier but change the following variables
 
-    {
-	    model: sift,
-	    ''
-	    ''
-	    k: 100,
-	    ''
+        {
+		model: sift,
+	    	''
+	    	''
+	    	k: 100,
+		visualize_single_vector: False,
+	    	''
 	}
 
-In addition to similar images, to get the feature descriptor as an output for the target image (*file_name*). Set the following variable in **config.ini**. 
-> visualize_single_vector: True.
+In addition to similar images, to get the feature descriptor as an output for the target image (*file_name*). Set the following variable in **config.ini**.
+
+	{
+		visualize_single_vector: True
+	}
 
 The vectors and visualisation for the model will be stored in the folder 'output' and varies based on the model set in the config file. 
 
