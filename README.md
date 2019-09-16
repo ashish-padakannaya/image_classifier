@@ -54,11 +54,7 @@ If we need to find the **100** most similar for the same image but this time wit
 
 	{
 		model: sift,
-	    	'',
-	    	'',
-	    	k: 100,
-		visualize_single_vector: False,
-	    	''
+	    	k: 100
 	}
 
 In addition to similar images, to get the feature descriptor as an output for the target image (*file_name*). Set the following variable in **config.ini**.
