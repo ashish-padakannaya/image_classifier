@@ -112,7 +112,7 @@ def visualize_save_vector(model, image_name, images_directory):
             mean = np.array(channel_moments[channel][0::3])
             sd = np.array(channel_moments[channel][1::3])
             sk = np.array(channel_moments[channel][2::3])
-            np.savetxt('output/' + channel + '_moments.txt', np.stack((mean,sd,sk)))
+            np.savetxt('output/' + channel + '_moments.txt', np.stack((mean,sd,sk), axis=-1))
         img = cv2.imread(images_directory + image_name)
         y, u, v = convert_to_yuv(images_directory+image_name)
         y = cv2.cvtColor(y, cv2.COLOR_GRAY2RGB)
