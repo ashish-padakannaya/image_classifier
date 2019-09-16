@@ -54,10 +54,11 @@ def generate_and_insert_moments(type, images_directory):
     """
     pool = mp.Pool(mp.cpu_count())
     collection = get_collection_obj('color_moment_descriptors')
-
+    
     args = [images_directory + img for img in os.listdir(images_directory)]
     upserts = []
     if type == 'color_moment':
+        collection = get_collection_obj('color_moment_descriptors')
         for op in tqdm(pool.imap_unordered(get_feature_descriptor, args), total=len(args),mininterval=1):
             image_name = op[0].replace(images_directory, '')
             upserts.append(
@@ -69,6 +70,7 @@ def generate_and_insert_moments(type, images_directory):
             )
     
     if type == 'sift':
+        collection = get_collection_obj('sift_descriptors')
         for op in tqdm(pool.imap_unordered(get_sift_descriptors, args), total=len(args),mininterval=1): 
             image_name = op[0].replace(images_directory, '')
             upserts.append(
