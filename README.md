@@ -52,7 +52,7 @@ For instance, If the system has to find the **10** most similar images using **c
 
 If we need to find the **100** most similar for the same image but this time with **SIFT**, we use the same config as earlier but change the following variables
 
-        {
+	{
 		model: sift,
 	    	''
 	    	''
