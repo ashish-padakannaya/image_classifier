@@ -54,8 +54,8 @@ If we need to find the **100** most similar for the same image but this time wit
 
 	{
 		model: sift,
-	    	''
-	    	''
+	    	'',
+	    	'',
 	    	k: 100,
 		visualize_single_vector: False,
 	    	''
